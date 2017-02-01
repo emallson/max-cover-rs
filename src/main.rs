@@ -19,7 +19,7 @@ Constructs and (optimally) solves Maximum k-Coverage instances.
 
 Usage:
     cover generate <output> <elements> <sets> [--max-size <size>]
-    cover solve <input> <k> [--threads <t>]
+    cover solve <input> <k> [--threads <t>] [--write <name>]
     cover (-h | --help)
     cover --version
 
@@ -28,6 +28,7 @@ Options:
     --version           Show version.
     --threads <t>       Set number of threads used.
     --max-size <size>   Maximum set size.
+    --write <name>      Write solution to <name>.
 ";
 
 #[derive(Debug, RustcDecodable)]
@@ -42,12 +43,19 @@ struct Args {
     arg_k: Option<usize>,
     flag_threads: Option<usize>,
     flag_max_size: Option<usize>,
+    flag_write: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Instance {
     ground: BTreeSet<usize>,
     sets: Vec<BTreeSet<usize>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Solution {
+    objective: f64,
+    sol: Vec<usize>,
 }
 
 fn do_generate(num_elements: usize, num_sets: usize, max_size: Option<usize>) -> Instance {
@@ -85,7 +93,7 @@ fn read(fname: &str) -> Result<Instance, serde_json::Error> {
     serde_json::from_reader(&f)
 }
 
-fn do_solve(inst: Instance, k: usize, threads: Option<usize>) {
+fn do_solve(inst: Instance, k: usize, threads: Option<usize>, write: Option<String>) {
     let mut env = Env::new().unwrap();
     env.set_param(EnvParam::Threads(threads.unwrap_or(1) as u64)).unwrap();
     env.set_param(EnvParam::ScreenOutput(true)).unwrap();
@@ -124,12 +132,19 @@ fn do_solve(inst: Instance, k: usize, threads: Option<usize>) {
 
     prob.write("problem.lp").unwrap();
     let sol = prob.solve().unwrap();
+    let sol_sets = set_vars.into_iter()
+        .filter(|&var| sol.variables[var] == VariableValue::Binary(true))
+        .collect::<Vec<_>>();
 
-    println!("Objective: {}", sol.objective);
-    println!("Solution: {:?}",
-             set_vars.iter()
-                 .filter(|&&var| sol.variables[var] == VariableValue::Binary(true))
-                 .collect::<Vec<_>>());
+    let out_sol = Solution {
+        objective: sol.objective,
+        sol: sol_sets,
+    };
+
+    println!("{:?}", out_sol);
+    if let Some(fname) = write {
+        serde_json::to_writer_pretty(&mut File::create(fname).unwrap(), &out_sol).unwrap();
+    }
 }
 
 fn main() {
@@ -147,7 +162,10 @@ fn main() {
         write(inst, &args.arg_output.unwrap());
     } else if args.cmd_solve {
         let inst = read(&args.arg_input.unwrap()).unwrap();
-        do_solve(inst, args.arg_k.unwrap(), args.flag_threads);
+        do_solve(inst,
+                 args.arg_k.unwrap(),
+                 args.flag_threads,
+                 args.flag_write);
     } else {
         panic!("no command given");
     }
